@@ -178,6 +178,9 @@ function App() {
   const [sessionMinMsgs, setSessionMinMsgs] = useState(1);
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [chartGranularity, setChartGranularity] = useState('daily');
+  const [sessionSortBy, setSessionSortBy] = useState('start');
+  const [sessionSortDir, setSessionSortDir] = useState('desc');
 
   const detectedNames = useMemo(() => [...new Set(rawMessages.map((m) => m.sender))].sort((a, b) => a.localeCompare(b)), [rawMessages]);
 
@@ -216,6 +219,20 @@ function App() {
       else row.text += 1;
     }
     return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
+  }, [mappedMessages]);
+
+  const monthlyData = useMemo(() => {
+    const map = new Map();
+    for (const m of mappedMessages) {
+      const month = `${m.dt.getFullYear()}-${String(m.dt.getMonth() + 1).padStart(2, '0')}`;
+      if (!map.has(month)) map.set(month, { month, total: 0, text: 0, attachments: 0 });
+      const row = map.get(month);
+      row[m.sender] = (row[m.sender] || 0) + 1;
+      row.total += 1;
+      if (m.is_attachment) row.attachments += 1;
+      else row.text += 1;
+    }
+    return [...map.values()].sort((a, b) => a.month.localeCompare(b.month));
   }, [mappedMessages]);
 
   const hourData = useMemo(() => {
@@ -284,6 +301,29 @@ function App() {
     }).filter((s) => s.count >= sessionMinMsgs)
       .filter((s) => !sessionKeyword.trim() || s.joinedText.toLowerCase().includes(sessionKeyword.toLowerCase()));
   }, [mappedMessages, gapMinutes, sessionMinMsgs, sessionKeyword]);
+
+  const sortedSessions = useMemo(() => {
+    const val = (session) => {
+      if (sessionSortBy === 'start') return session.start.getTime();
+      if (sessionSortBy === 'end') return session.end.getTime();
+      if (sessionSortBy === 'count') return session.count;
+      if (sessionSortBy === 'duration') return session.durationMs;
+      if (sessionSortBy === 'text') return session.textCount;
+      if (sessionSortBy === 'attachments') return session.attachCount;
+      if (sessionSortBy === 'dominant') return session.dominantPct;
+      return session.start.getTime();
+    };
+
+    return [...sessions].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (typeof av === 'string') return sessionSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sessionSortDir === 'asc' ? av - bv : bv - av;
+    });
+  }, [sessions, sessionSortBy, sessionSortDir]);
+
+  const chartData = chartGranularity === 'monthly' ? monthlyData : dailyData;
+  const chartXAxisKey = chartGranularity === 'monthly' ? 'month' : 'date';
 
   const stats = useMemo(() => {
     const msgs = [...mappedMessages].sort((a, b) => a.dt - b.dt);
@@ -493,7 +533,7 @@ function App() {
     };
   }, [mappedMessages, sessions]);
 
-  const selectedSession = sessions.find((s) => s.id === selectedSessionId);
+  const selectedSession = sortedSessions.find((s) => s.id === selectedSessionId);
   const colors = ['#2563eb', '#16a34a', '#9333ea', '#ea580c', '#dc2626', '#0891b2'];
 
   return <div className="page">
@@ -570,14 +610,20 @@ function App() {
     </section>}
 
     <section className="card">
-      <h2>Daily messages (brush to zoom range)</h2>
-      <div className="chartWrap"><ResponsiveContainer width="100%" height={340}><LineChart data={dailyData}>
-        <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Legend />
+      <h2>Messages over time</h2>
+      <label>Granularity
+        <select value={chartGranularity} onChange={(e) => setChartGranularity(e.target.value)}>
+          <option value="daily">Daily</option>
+          <option value="monthly">Monthly</option>
+        </select>
+      </label>
+      <div className="chartWrap"><ResponsiveContainer width="100%" height={340}><LineChart data={chartData}>
+        <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey={chartXAxisKey} /><YAxis /><Tooltip /><Legend />
         <Line type="monotone" dataKey="total" stroke="#111827" strokeWidth={2} dot={false} />
         <Line type="monotone" dataKey="text" stroke="#16a34a" dot={false} />
         <Line type="monotone" dataKey="attachments" stroke="#dc2626" dot={false} />
         {participantKeys.map((k, i) => <Line key={k} type="monotone" dataKey={k} stroke={colors[i % colors.length]} dot={false} />)}
-        <Brush dataKey="date" height={25} travellerWidth={10} />
+        {chartGranularity === 'daily' && <Brush dataKey="date" height={25} travellerWidth={10} />}
       </LineChart></ResponsiveContainer></div>
     </section>
 
@@ -593,8 +639,27 @@ function App() {
 
     <section className="card">
       <h2>5) Session explorer</h2>
-      <p>Total sessions: {sessions.length}</p>
-      <div className="sessionList">{sessions.map((s) => <button key={s.id} className="sessionBtn" onClick={() => setSelectedSessionId(s.id)}><strong>{s.start.toLocaleString()}</strong> → {s.end.toLocaleTimeString()} | {s.count} msgs | {s.durationMin} min | dominant: {s.dominant} ({s.dominantPct}%)</button>)}</div>
+      <p>Total sessions: {sortedSessions.length}</p>
+      <div className="controls">
+        <label>Sort sessions by
+          <select value={sessionSortBy} onChange={(e) => setSessionSortBy(e.target.value)}>
+            <option value="start">Start time</option>
+            <option value="end">End time</option>
+            <option value="count">Message count</option>
+            <option value="duration">Duration</option>
+            <option value="text">Text messages</option>
+            <option value="attachments">Attachments</option>
+            <option value="dominant">Dominant %</option>
+          </select>
+        </label>
+        <label>Direction
+          <select value={sessionSortDir} onChange={(e) => setSessionSortDir(e.target.value)}>
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </select>
+        </label>
+      </div>
+      <div className="sessionList">{sortedSessions.map((s) => <button key={s.id} className="sessionBtn" onClick={() => setSelectedSessionId(s.id)}><strong>{s.start.toLocaleString()}</strong> → {s.end.toLocaleTimeString()} | {s.count} msgs | {s.durationMin} min | dominant: {s.dominant} ({s.dominantPct}%)</button>)}</div>
       {selectedSession && <div className="drilldown">
         <h3>Session detail</h3>
         <p>{selectedSession.start.toLocaleString()} to {selectedSession.end.toLocaleString()} · {selectedSession.count} messages · {selectedSession.durationMin} minutes · text {selectedSession.textCount} · attachments {selectedSession.attachCount}</p>
