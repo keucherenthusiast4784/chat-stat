@@ -22,3 +22,7 @@ th { background: #f9fafb; }
 .drilldown { margin-top: 12px; border-top: 1px solid #e5e7eb; padding-top: 10px; }
 .msgs { max-height: 280px; overflow: auto; background: #f9fafb; padding: 8px; border-radius: 8px; }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+
+.linkBtn { border: 0; background: none; color: #2563eb; cursor: pointer; padding: 0; text-decoration: underline; font: inherit; }
+.dayDrilldown { min-height: 70vh; }
+.dayMsgs { margin-top: 12px; max-height: none; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }

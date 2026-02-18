@@ -24,6 +24,14 @@ const SWEAR_RE = /\b(fuck|shit|bitch|cunt|asshole|nigga|wtf|stfu)\b/gi;
 const normalizeText = (s) => s.replace(/\u202f/g, ' ').replace(/\u200e|\u200f|\ufeff/g, '').replace(/\r/g, '');
 const formatDate = (d) => d.toISOString().slice(0, 10);
 const fmtDateTime = (d) => d?.toLocaleString() || 'N/A';
+const formatMMDDYYYY = (d) => {
+  if (!d) return 'N/A';
+  const dt = typeof d === 'string' ? new Date(`${d}T00:00:00`) : d;
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  const yyyy = dt.getFullYear();
+  return `${mm}/${dd}/${yyyy}`;
+};
 const fmtDuration = (ms) => {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
@@ -178,6 +186,7 @@ function App() {
   const [sessionMinMsgs, setSessionMinMsgs] = useState(1);
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [selectedDay, setSelectedDay] = useState('');
   const [chartGranularity, setChartGranularity] = useState('daily');
   const [sessionSortBy, setSessionSortBy] = useState('start');
   const [sessionSortDir, setSessionSortDir] = useState('desc');
@@ -324,6 +333,10 @@ function App() {
 
   const chartData = chartGranularity === 'monthly' ? monthlyData : dailyData;
   const chartXAxisKey = chartGranularity === 'monthly' ? 'month' : 'date';
+  const selectedDayMessages = useMemo(() => {
+    if (!selectedDay) return [];
+    return [...mappedMessages].filter((m) => formatDate(m.dt) === selectedDay).sort((a, b) => a.dt - b.dt);
+  }, [mappedMessages, selectedDay]);
 
   const stats = useMemo(() => {
     const msgs = [...mappedMessages].sort((a, b) => a.dt - b.dt);
@@ -576,8 +589,11 @@ function App() {
         <div><b>Total words:</b> {stats.totalWords} | <b>Total chars:</b> {stats.totalChars}</div>
         <div><b>Avg/day:</b> {stats.avgAll.toFixed(2)} | <b>Median/day:</b> {stats.medAll.toFixed(0)}</div>
         <div><b>Avg text/day:</b> {stats.avgText.toFixed(2)} | <b>Median text/day:</b> {stats.medText.toFixed(0)}</div>
-        <div><b>Longest gap:</b> {fmtDuration(stats.longestGapMs)} {stats.gapPair ? `(${fmtDateTime(stats.gapPair[0])} → ${fmtDateTime(stats.gapPair[1])})` : ''}</div>
-        <div><b>Longest streak:</b> {stats.longestStreak} days {stats.streakStart ? `(${stats.streakStart} → ${stats.streakEnd})` : ''}</div>
+        <div><b>Longest gap:</b> {fmtDuration(stats.longestGapMs)} {stats.gapPair ? <span>(<button className="linkBtn" onClick={() => setSelectedDay(formatDate(stats.gapPair[0]))}>{formatMMDDYYYY(stats.gapPair[0])}</button> {stats.gapPair[0].toLocaleTimeString()} → <button className="linkBtn" onClick={() => setSelectedDay(formatDate(stats.gapPair[1]))}>{formatMMDDYYYY(stats.gapPair[1])}</button> {stats.gapPair[1].toLocaleTimeString()})</span> : ''}</div>
+        <div><b>Longest streak:</b> {stats.longestStreak} days {stats.streakStart
+          ? <span>(<button className="linkBtn" onClick={() => setSelectedDay(stats.streakStart)}>{formatMMDDYYYY(stats.streakStart)}</button> → <button className="linkBtn" onClick={() => setSelectedDay(stats.streakEnd)}>{formatMMDDYYYY(stats.streakEnd)}</button>)</span>
+          : ''}
+        </div>
         <div><b>Response median:</b> {fmtDuration(stats.respMedian * 1000)} | <b>P90:</b> {fmtDuration(stats.respP90 * 1000)}</div>
         <div><b>5-min burst:</b> {stats.burst.count} msgs {stats.burst.start ? `(${fmtDateTime(stats.burst.start)} → ${fmtDateTime(stats.burst.end)})` : ''}</div>
         <div><b>Most active month:</b> {stats.topMonth ? `${stats.topMonth[0]} (${stats.topMonth[1]} msgs)` : 'N/A'}</div>
@@ -591,8 +607,8 @@ function App() {
 
       <h3>Top days & attachment breakdown</h3>
       <div className="split">
-        <div><p><b>Top 3 busiest days (all)</b></p><ul>{stats.top3All.map(([d, c]) => <li key={d}>{d}: {c}</li>)}</ul></div>
-        <div><p><b>Top 3 busiest days (text)</b></p><ul>{stats.top3Text.map(([d, c]) => <li key={d}>{d}: {c}</li>)}</ul></div>
+        <div><p><b>Top 3 busiest days (all)</b></p><ul>{stats.top3All.map(([d, c]) => <li key={d}><button className="linkBtn" onClick={() => setSelectedDay(d)}>{formatMMDDYYYY(d)}</button>: {c}</li>)}</ul></div>
+        <div><p><b>Top 3 busiest days (text)</b></p><ul>{stats.top3Text.map(([d, c]) => <li key={d}><button className="linkBtn" onClick={() => setSelectedDay(d)}>{formatMMDDYYYY(d)}</button>: {c}</li>)}</ul></div>
       </div>
       <ul>{Object.entries(stats.attachBreakdown).map(([k, v]) => <li key={k}>{k}: {v}</li>)}</ul>
 
@@ -617,7 +633,10 @@ function App() {
           <option value="monthly">Monthly</option>
         </select>
       </label>
-      <div className="chartWrap"><ResponsiveContainer width="100%" height={340}><LineChart data={chartData}>
+      <p>{chartGranularity === 'daily' ? 'Click a day on this chart to open the full merged transcript for that day.' : 'Switch to Daily to click through to a specific day transcript.'}</p>
+      <div className="chartWrap"><ResponsiveContainer width="100%" height={340}><LineChart data={chartData} onClick={(st) => {
+        if (chartGranularity === 'daily' && st?.activeLabel) setSelectedDay(st.activeLabel);
+      }}>
         <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey={chartXAxisKey} /><YAxis /><Tooltip /><Legend />
         <Line type="monotone" dataKey="total" stroke="#111827" strokeWidth={2} dot={false} />
         <Line type="monotone" dataKey="text" stroke="#16a34a" dot={false} />
@@ -637,6 +656,17 @@ function App() {
       <div className="chartWrap small"><ResponsiveContainer width="100%" height={280}><BarChart data={weekdayData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" /><YAxis /><Tooltip /><Legend /><Bar dataKey="all" fill="#9333ea" /><Bar dataKey="text" fill="#f59e0b" /></BarChart></ResponsiveContainer></div>
     </section>
 
+
+    {selectedDay && <section className="card dayDrilldown">
+      <h2>Day transcript: {formatMMDDYYYY(selectedDay)}</h2>
+      <p>Total merged messages on this day: {selectedDayMessages.length}</p>
+      <button className="sessionBtn" onClick={() => setSelectedDay('')}>Close day transcript</button>
+      <div className="dayMsgs">
+        {selectedDayMessages.map((m, i) => <p key={`${m.sender}-${m.dt.getTime()}-${i}`}>
+          <b>[{m.dt.toLocaleTimeString()}] {m.sender}</b> <i>({m.source})</i>: {m.text || `(attachment: ${m.attachment_type || 'unknown'})`}
+        </p>)}
+      </div>
+    </section>}
     <section className="card">
       <h2>5) Session explorer</h2>
       <p>Total sessions: {sortedSessions.length}</p>
