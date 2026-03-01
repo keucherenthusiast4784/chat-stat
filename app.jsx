@@ -20,6 +20,7 @@ const DISC_BLOCK_HEADER = /^\[(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2})(?::(\d
 const DISCORD_ATTACHMENT_BLOCKS = new Set(['{Attachments}', '{Embed}', '{Stickers}']);
 const WA_ATTACHMENT_MARKERS = ['image omitted', 'sticker omitted', 'video omitted', 'gif omitted', 'audio omitted', 'document omitted'];
 const SWEAR_RE = /\b(fuck|shit|bitch|cunt|asshole|nigga|wtf|stfu)\b/gi;
+const COMMON_WORDS = new Set(['i','me','my','we','our','you','your','he','she','it','they','them','this','that','these','those','a','an','the','and','or','but','if','to','of','in','on','for','with','is','am','are','was','were','be','been','being','do','does','did','have','has','had','so','not','at','from','as','by','about','can','will','just','im','u','ur']);
 
 const normalizeText = (s) => s.replace(/\u202f/g, ' ').replace(/\u200e|\u200f|\ufeff/g, '').replace(/\r/g, '');
 const formatDate = (d) => d.toISOString().slice(0, 10);
@@ -190,6 +191,8 @@ function App() {
   const [chartGranularity, setChartGranularity] = useState('daily');
   const [sessionSortBy, setSessionSortBy] = useState('start');
   const [sessionSortDir, setSessionSortDir] = useState('desc');
+  const [excludeCommonWords, setExcludeCommonWords] = useState(true);
+  const [excludeOneCharWords, setExcludeOneCharWords] = useState(true);
 
   const detectedNames = useMemo(() => [...new Set(rawMessages.map((m) => m.sender))].sort((a, b) => a.localeCompare(b)), [rawMessages]);
 
@@ -337,6 +340,19 @@ function App() {
     if (!selectedDay) return [];
     return [...mappedMessages].filter((m) => formatDate(m.dt) === selectedDay).sort((a, b) => a.dt - b.dt);
   }, [mappedMessages, selectedDay]);
+
+  const topWords = useMemo(() => {
+    const freq = {};
+    mappedMessages.filter((m) => !m.is_attachment).forEach((m) => {
+      const words = m.text.toLowerCase().replace(/https?:\/\/\S+/g, ' ').match(/[a-z0-9']+/g) || [];
+      words.forEach((w) => {
+        if (excludeOneCharWords && w.length <= 1) return;
+        if (excludeCommonWords && COMMON_WORDS.has(w)) return;
+        freq[w] = (freq[w] || 0) + 1;
+      });
+    });
+    return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 30);
+  }, [mappedMessages, excludeCommonWords, excludeOneCharWords]);
 
   const stats = useMemo(() => {
     const msgs = [...mappedMessages].sort((a, b) => a.dt - b.dt);
@@ -580,6 +596,8 @@ function App() {
       <label>Session min messages <input type="number" min="1" value={sessionMinMsgs} onChange={(e) => setSessionMinMsgs(Number(e.target.value) || 1)} /></label>
       <label>Session keyword <input value={sessionKeyword} onChange={(e) => setSessionKeyword(e.target.value)} /></label>
       <label><input type="checkbox" checked={includeBots} onChange={(e) => setIncludeBots(e.target.checked)} /> Include bots</label>
+      <label><input type="checkbox" checked={excludeCommonWords} onChange={(e) => setExcludeCommonWords(e.target.checked)} /> Exclude common words (I, the, you...)</label>
+      <label><input type="checkbox" checked={excludeOneCharWords} onChange={(e) => setExcludeOneCharWords(e.target.checked)} /> Exclude one-character words/emojis/punctuation-like tokens</label>
     </section>
 
     {stats && <section className="card">
@@ -595,7 +613,7 @@ function App() {
           : ''}
         </div>
         <div><b>Response median:</b> {fmtDuration(stats.respMedian * 1000)} | <b>P90:</b> {fmtDuration(stats.respP90 * 1000)}</div>
-        <div><b>5-min burst:</b> {stats.burst.count} msgs {stats.burst.start ? `(${fmtDateTime(stats.burst.start)} → ${fmtDateTime(stats.burst.end)})` : ''}</div>
+        <div><b>5-min burst:</b> {stats.burst.count} msgs {stats.burst.start ? <span>(<button className="linkBtn" onClick={() => setSelectedDay(formatDate(stats.burst.start))}>{formatMMDDYYYY(stats.burst.start)}</button> {stats.burst.start.toLocaleTimeString()} → <button className="linkBtn" onClick={() => setSelectedDay(formatDate(stats.burst.end))}>{formatMMDDYYYY(stats.burst.end)}</button> {stats.burst.end.toLocaleTimeString()})</span> : ''}</div>
         <div><b>Most active month:</b> {stats.topMonth ? `${stats.topMonth[0]} (${stats.topMonth[1]} msgs)` : 'N/A'}</div>
         <div><b>Swear-ish hits:</b> {stats.swearTotal} | <b>Emoji-ish chars:</b> {stats.emojiTotal}</div>
       </div>
@@ -611,6 +629,10 @@ function App() {
         <div><p><b>Top 3 busiest days (text)</b></p><ul>{stats.top3Text.map(([d, c]) => <li key={d}><button className="linkBtn" onClick={() => setSelectedDay(d)}>{formatMMDDYYYY(d)}</button>: {c}</li>)}</ul></div>
       </div>
       <ul>{Object.entries(stats.attachBreakdown).map(([k, v]) => <li key={k}>{k}: {v}</li>)}</ul>
+
+      <h3>Most used words</h3>
+      <p>Based on text messages only. Current filters: {excludeCommonWords ? 'excluding common words' : 'including common words'}; {excludeOneCharWords ? 'excluding one-character tokens' : 'including one-character tokens'}.</p>
+      <div className="tableWrap"><table><thead><tr><th>Word</th><th>Count</th></tr></thead><tbody>{topWords.map(([w, c]) => <tr key={w}><td>{w}</td><td>{c}</td></tr>)}</tbody></table></div>
 
       <h3>Session analytics</h3>
       <div className="statsGrid">
