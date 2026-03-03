@@ -396,6 +396,44 @@ function App() {
     });
   }, [mappedMessages, keywordTerms, keywordTrendGranularity, keywordTrendAsPct]);
 
+  const keywordTrendByPersonData = useMemo(() => {
+    if (!keywordTerms.length) return [];
+    const rows = new Map();
+    const countOccurrences = (text, term) => {
+      const re = new RegExp(`\\b${escapeRegex(term)}\\b`, 'gi');
+      return (text.match(re) || []).length;
+    };
+
+    mappedMessages.filter((m) => !m.is_attachment).forEach((m) => {
+      const bucket = keywordTrendGranularity === 'monthly'
+        ? `${m.dt.getFullYear()}-${String(m.dt.getMonth() + 1).padStart(2, '0')}`
+        : formatDate(m.dt);
+      if (!rows.has(bucket)) rows.set(bucket, { bucket, totalWords: 0, totalHits: 0, byPersonHits: {}, byPersonWords: {} });
+      const row = rows.get(bucket);
+      const low = m.text.toLowerCase();
+      const words = wordCount(m.text);
+      const hits = keywordTerms.reduce((acc, term) => acc + countOccurrences(low, term), 0);
+
+      row.totalWords += words;
+      row.totalHits += hits;
+      row.byPersonHits[m.sender] = (row.byPersonHits[m.sender] || 0) + hits;
+      row.byPersonWords[m.sender] = (row.byPersonWords[m.sender] || 0) + words;
+    });
+
+    return [...rows.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)).map((row) => {
+      const out = {
+        bucket: row.bucket,
+        total: keywordTrendAsPct ? (row.totalWords ? (row.totalHits / row.totalWords) * 100 : 0) : row.totalHits,
+      };
+      participantKeys.forEach((name) => {
+        const raw = row.byPersonHits[name] || 0;
+        const words = row.byPersonWords[name] || 0;
+        out[name] = keywordTrendAsPct ? (words ? (raw / words) * 100 : 0) : raw;
+      });
+      return out;
+    });
+  }, [mappedMessages, keywordTerms, keywordTrendGranularity, keywordTrendAsPct, participantKeys]);
+
   const keywordUsageByPerson = useMemo(() => {
     if (!keywordTerms.length) return [];
     const countOccurrences = (text, term) => {
@@ -751,6 +789,12 @@ function App() {
         <div className="chartWrap"><ResponsiveContainer width="100%" height={320}><LineChart data={keywordTrendData}>
           <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="bucket" /><YAxis /><Tooltip formatter={(v) => keywordTrendAsPct ? `${Number(v).toFixed(2)}%` : v} /><Legend />
           {keywordTerms.map((term, i) => <Line key={term} type="monotone" dataKey={term} stroke={colors[i % colors.length]} dot={false} />)}
+        </LineChart></ResponsiveContainer></div>
+        <p>Keyword usage over time by person (plus total):</p>
+        <div className="chartWrap"><ResponsiveContainer width="100%" height={320}><LineChart data={keywordTrendByPersonData}>
+          <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="bucket" /><YAxis /><Tooltip formatter={(v) => keywordTrendAsPct ? `${Number(v).toFixed(2)}%` : v} /><Legend />
+          <Line type="monotone" dataKey="total" stroke="#111827" strokeWidth={2} dot={false} />
+          {participantKeys.map((name, i) => <Line key={`kw-person-${name}`} type="monotone" dataKey={name} stroke={colors[i % colors.length]} dot={false} />)}
         </LineChart></ResponsiveContainer></div>
         <p>Keyword totals by person (and overall):</p>
         <div className="chartWrap small"><ResponsiveContainer width="100%" height={280}><BarChart data={keywordUsageByPerson}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="count" fill="#334155" /></BarChart></ResponsiveContainer></div>
