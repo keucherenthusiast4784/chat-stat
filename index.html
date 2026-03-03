@@ -9,9 +9,29 @@
   <body>
     <div id="root"></div>
 
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    <script>
+      // Recharts UMD expects a global PropTypes object.
+      // Provide a minimal runtime-safe fallback for static/CDN hosting.
+      (function ensurePropTypesGlobal() {
+        if (window.PropTypes) return;
+        var createValidator = function () {
+          var validator = function () { return null; };
+          validator.isRequired = validator;
+          return validator;
+        };
+        var propTypesShim = new Proxy({}, {
+          get: function (target, key) {
+            if (key === '__esModule') return true;
+            if (key === 'default') return propTypesShim;
+            return function () { return createValidator(); };
+          }
+        });
+        window.PropTypes = propTypesShim;
+      }());
+    </script>
+    <script src="https://unpkg.com/recharts@2.1.13/umd/Recharts.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script type="text/babel" src="app.jsx"></script>
   </body>
