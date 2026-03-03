@@ -67,6 +67,8 @@ const median = (nums) => {
   return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
 };
 
+const escapeRegex = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const percentile = (vals, p) => {
   if (!vals.length) return 0;
   const arr = [...vals].sort((a, b) => a - b);
@@ -193,6 +195,9 @@ function App() {
   const [sessionSortDir, setSessionSortDir] = useState('desc');
   const [excludeCommonWords, setExcludeCommonWords] = useState(true);
   const [excludeOneCharWords, setExcludeOneCharWords] = useState(true);
+  const [keywordTrendQuery, setKeywordTrendQuery] = useState('ok');
+  const [keywordTrendGranularity, setKeywordTrendGranularity] = useState('daily');
+  const [keywordTrendAsPct, setKeywordTrendAsPct] = useState(false);
 
   const detectedNames = useMemo(() => [...new Set(rawMessages.map((m) => m.sender))].sort((a, b) => a.localeCompare(b)), [rawMessages]);
 
@@ -353,6 +358,43 @@ function App() {
     });
     return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 30);
   }, [mappedMessages, excludeCommonWords, excludeOneCharWords]);
+
+  const keywordTerms = useMemo(() => keywordTrendQuery
+    .split(',')
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean), [keywordTrendQuery]);
+
+  const keywordTrendData = useMemo(() => {
+    if (!keywordTerms.length) return [];
+
+    const rows = new Map();
+    const countOccurrences = (text, term) => {
+      const re = new RegExp(`\\b${escapeRegex(term)}\\b`, 'gi');
+      return (text.match(re) || []).length;
+    };
+
+    mappedMessages.filter((m) => !m.is_attachment).forEach((m) => {
+      const bucket = keywordTrendGranularity === 'monthly'
+        ? `${m.dt.getFullYear()}-${String(m.dt.getMonth() + 1).padStart(2, '0')}`
+        : formatDate(m.dt);
+      if (!rows.has(bucket)) rows.set(bucket, { bucket, totalWords: 0 });
+      const row = rows.get(bucket);
+      row.totalWords += wordCount(m.text);
+      const low = m.text.toLowerCase();
+      keywordTerms.forEach((term) => {
+        row[term] = (row[term] || 0) + countOccurrences(low, term);
+      });
+    });
+
+    return [...rows.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)).map((row) => {
+      const out = { bucket: row.bucket, totalWords: row.totalWords };
+      keywordTerms.forEach((term) => {
+        const raw = row[term] || 0;
+        out[term] = keywordTrendAsPct ? (row.totalWords ? (raw / row.totalWords) * 100 : 0) : raw;
+      });
+      return out;
+    });
+  }, [mappedMessages, keywordTerms, keywordTrendGranularity, keywordTrendAsPct]);
 
   const stats = useMemo(() => {
     const msgs = [...mappedMessages].sort((a, b) => a.dt - b.dt);
@@ -666,6 +708,28 @@ function App() {
         {participantKeys.map((k, i) => <Line key={k} type="monotone" dataKey={k} stroke={colors[i % colors.length]} dot={false} />)}
         {chartGranularity === 'daily' && <Brush dataKey="date" height={25} travellerWidth={10} />}
       </LineChart></ResponsiveContainer></div>
+    </section>
+
+
+    <section className="card">
+      <h2>Keyword usage over time</h2>
+      <div className="controls">
+        <label>Keyword(s), comma-separated
+          <input value={keywordTrendQuery} onChange={(e) => setKeywordTrendQuery(e.target.value)} placeholder="e.g. ok, sorry, lol" />
+        </label>
+        <label>Granularity
+          <select value={keywordTrendGranularity} onChange={(e) => setKeywordTrendGranularity(e.target.value)}>
+            <option value="daily">Daily</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </label>
+        <label><input type="checkbox" checked={keywordTrendAsPct} onChange={(e) => setKeywordTrendAsPct(e.target.checked)} /> Show as % of all words in that period</label>
+      </div>
+      {keywordTerms.length === 0 ? <p>Enter at least one keyword.</p> : <div className="chartWrap"><ResponsiveContainer width="100%" height={320}><LineChart data={keywordTrendData}>
+        <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="bucket" /><YAxis /><Tooltip formatter={(v) => keywordTrendAsPct ? `${Number(v).toFixed(2)}%` : v} /><Legend />
+        {keywordTerms.map((term, i) => <Line key={term} type="monotone" dataKey={term} stroke={colors[i % colors.length]} dot={false} />)}
+      </LineChart></ResponsiveContainer></div>}
+      <p>{keywordTrendAsPct ? 'Percentage mode normalizes by total words per period, so relative usage is comparable across different-volume days/months.' : 'Count mode shows raw keyword occurrences per period.'}</p>
     </section>
 
     <section className="card split">
