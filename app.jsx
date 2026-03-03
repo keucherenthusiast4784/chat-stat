@@ -396,6 +396,28 @@ function App() {
     });
   }, [mappedMessages, keywordTerms, keywordTrendGranularity, keywordTrendAsPct]);
 
+  const keywordUsageByPerson = useMemo(() => {
+    if (!keywordTerms.length) return [];
+    const countOccurrences = (text, term) => {
+      const re = new RegExp(`\\b${escapeRegex(term)}\\b`, 'gi');
+      return (text.match(re) || []).length;
+    };
+
+    const byPerson = {};
+    mappedMessages.filter((m) => !m.is_attachment).forEach((m) => {
+      const low = m.text.toLowerCase();
+      const hitCount = keywordTerms.reduce((acc, term) => acc + countOccurrences(low, term), 0);
+      if (hitCount <= 0) return;
+      byPerson[m.sender] = (byPerson[m.sender] || 0) + hitCount;
+    });
+
+    const personRows = Object.entries(byPerson)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+    const total = personRows.reduce((acc, r) => acc + r.count, 0);
+    return [{ name: 'Total', count: total }, ...personRows];
+  }, [mappedMessages, keywordTerms]);
+
   const stats = useMemo(() => {
     const msgs = [...mappedMessages].sort((a, b) => a.dt - b.dt);
     if (!msgs.length) return null;
@@ -725,10 +747,14 @@ function App() {
         </label>
         <label><input type="checkbox" checked={keywordTrendAsPct} onChange={(e) => setKeywordTrendAsPct(e.target.checked)} /> Show as % of all words in that period</label>
       </div>
-      {keywordTerms.length === 0 ? <p>Enter at least one keyword.</p> : <div className="chartWrap"><ResponsiveContainer width="100%" height={320}><LineChart data={keywordTrendData}>
-        <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="bucket" /><YAxis /><Tooltip formatter={(v) => keywordTrendAsPct ? `${Number(v).toFixed(2)}%` : v} /><Legend />
-        {keywordTerms.map((term, i) => <Line key={term} type="monotone" dataKey={term} stroke={colors[i % colors.length]} dot={false} />)}
-      </LineChart></ResponsiveContainer></div>}
+      {keywordTerms.length === 0 ? <p>Enter at least one keyword.</p> : <>
+        <div className="chartWrap"><ResponsiveContainer width="100%" height={320}><LineChart data={keywordTrendData}>
+          <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="bucket" /><YAxis /><Tooltip formatter={(v) => keywordTrendAsPct ? `${Number(v).toFixed(2)}%` : v} /><Legend />
+          {keywordTerms.map((term, i) => <Line key={term} type="monotone" dataKey={term} stroke={colors[i % colors.length]} dot={false} />)}
+        </LineChart></ResponsiveContainer></div>
+        <p>Keyword totals by person (and overall):</p>
+        <div className="chartWrap small"><ResponsiveContainer width="100%" height={280}><BarChart data={keywordUsageByPerson}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="count" fill="#334155" /></BarChart></ResponsiveContainer></div>
+      </>}
       <p>{keywordTrendAsPct ? 'Percentage mode normalizes by total words per period, so relative usage is comparable across different-volume days/months.' : 'Count mode shows raw keyword occurrences per period.'}</p>
     </section>
 
